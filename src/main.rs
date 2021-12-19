@@ -30,7 +30,7 @@ fn main() {
                 DynamicImage::ImageRgb8(rgb_image) => rgb_image,
                 img => img.into_rgb8(),
             };
-            let qt = QuadTree::new(&rgb_image, 5);
+            let qt = QuadTree::new(&rgb_image, 10);
 
             qt.render(out_path);
         } else {
