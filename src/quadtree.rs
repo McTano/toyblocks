@@ -6,11 +6,14 @@ pub(crate) struct QuadTree<'a> {
     img: &'a RgbImage,
     root: QuadTreeNode<'a>,
 }
-
-enum TreeDivision<'a> {
+enum SubTree<'a> {
     Leaf,
-    SplitX(QuadTreeNode<'a>, QuadTreeNode<'a>),
-    SplitY(QuadTreeNode<'a>, QuadTreeNode<'a>),
+    Split {
+        nw: QuadTreeNode<'a>,
+        ne: QuadTreeNode<'a>,
+        sw: QuadTreeNode<'a>,
+        se: QuadTreeNode<'a>,
+    },
 }
 
 struct QuadTreeNode<'a> {
@@ -19,7 +22,7 @@ struct QuadTreeNode<'a> {
     y: u32,
     width: u32,
     height: u32,
-    subtree: Box<TreeDivision<'a>>,
+    subtree: Box<SubTree<'a>>,
 }
 
 impl<'a> QuadTreeNode<'a> {
@@ -35,15 +38,28 @@ impl<'a> QuadTreeNode<'a> {
             y,
             width,
             height,
-            subtree: Box::new(TreeDivision::Leaf),
+            subtree: Box::new(SubTree::Leaf),
         };
         if tree_depth > 0 {
-            let ctr = width / 2;
+            let ctr_x = width / 2;
+            let ctr_y = height / 2;
             println!("subdivide image, tree_depth = {}", tree_depth);
-            qt.subtree = Box::new(TreeDivision::SplitX(
-                QuadTreeNode::new(&img, (x, y), (ctr, height), tree_depth - 1),
-                QuadTreeNode::new(&img, (x + ctr, y), (width - ctr, height), tree_depth - 1),
-            ));
+            qt.subtree = Box::new(SubTree::Split {
+                nw: QuadTreeNode::new(&img, (x, y), (ctr_x, ctr_y), tree_depth - 1),
+                ne: QuadTreeNode::new(&img, (x + ctr_x, y), (width - ctr_x, ctr_y), tree_depth - 1),
+                sw: QuadTreeNode::new(
+                    &img,
+                    (x, y + ctr_y),
+                    (ctr_x, height - ctr_y),
+                    tree_depth - 1,
+                ),
+                se: QuadTreeNode::new(
+                    &img,
+                    (x + ctr_x, y + ctr_y),
+                    (width - ctr_x, height - ctr_y),
+                    tree_depth - 1,
+                ),
+            });
         };
         qt
     }
@@ -81,19 +97,11 @@ impl<'a> QuadTreeNode<'a> {
             (total_g / num_pixels).try_into().unwrap(),
             (total_b / num_pixels).try_into().unwrap(),
         ])
-        // for (x, y) in (self.x..{
-        //     let ref this = self;
-        //     this.x + this.width
-        // })
-        //     .zip(self.y..(self.y + self.height))
-        // {
-        //     let pixel = self.img.get_pixel(self.x + x, self.y + y);
-        // }
     }
 
     fn render(&self, out_image: &mut RgbImage) {
         match &*self.subtree {
-            TreeDivision::Leaf => {
+            SubTree::Leaf => {
                 let avg_pixel = self.avg_pixel();
                 // println!("avg pixel content for this image = {:?}", avg_pixel);
                 let rectangle: ImageBuffer<Rgb<u8>, Vec<u8>> =
@@ -103,13 +111,11 @@ impl<'a> QuadTreeNode<'a> {
                     });
                 out_image.copy_from(&rectangle, self.x, self.y).unwrap();
             }
-            TreeDivision::SplitX(left, right) => {
-                left.render(out_image);
-                right.render(out_image);
-            }
-            TreeDivision::SplitY(top, bottom) => {
-                top.render(out_image);
-                bottom.render(out_image);
+            SubTree::Split { nw, ne, sw, se } => {
+                nw.render(out_image);
+                ne.render(out_image);
+                sw.render(out_image);
+                se.render(out_image);
             }
         }
     }
