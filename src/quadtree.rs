@@ -2,6 +2,8 @@ use image::GenericImage;
 use image::{ImageBuffer, Rgb, RgbImage};
 use itertools::Itertools;
 
+use crate::util;
+
 pub(crate) struct QuadTree<'a> {
     img: &'a RgbImage,
     root: QuadTreeNode<'a>,
@@ -16,6 +18,19 @@ enum SubTree<'a> {
     },
 }
 
+impl<'a> SubTree<'a> {
+    fn quadrants_mut(&mut self, mut cb: impl FnMut(&mut QuadTreeNode) -> ()) {
+        match self {
+            SubTree::Leaf => (),
+            SubTree::Split { nw, ne, sw, se } => {
+                for q in [nw, ne, sw, se] {
+                    cb(q);
+                }
+            }
+        }
+    }
+}
+
 struct QuadTreeNode<'a> {
     img: &'a RgbImage,
     x: u32,
@@ -23,6 +38,7 @@ struct QuadTreeNode<'a> {
     width: u32,
     height: u32,
     subtree: Box<SubTree<'a>>,
+    avg_pixel: Rgb<u8>,
 }
 
 impl<'a> QuadTreeNode<'a> {
@@ -39,28 +55,12 @@ impl<'a> QuadTreeNode<'a> {
             width,
             height,
             subtree: Box::new(SubTree::Leaf),
+            // TODO use a lazy wrapper to avoid setting this default value before the calculation.
+            avg_pixel: Rgb([0, 0, 0]),
         };
-        if tree_depth > 0 {
-            let ctr_x = width / 2;
-            let ctr_y = height / 2;
-            println!("subdivide image, tree_depth = {}", tree_depth);
-            qt.subtree = Box::new(SubTree::Split {
-                nw: QuadTreeNode::new(&img, (x, y), (ctr_x, ctr_y), tree_depth - 1),
-                ne: QuadTreeNode::new(&img, (x + ctr_x, y), (width - ctr_x, ctr_y), tree_depth - 1),
-                sw: QuadTreeNode::new(
-                    &img,
-                    (x, y + ctr_y),
-                    (ctr_x, height - ctr_y),
-                    tree_depth - 1,
-                ),
-                se: QuadTreeNode::new(
-                    &img,
-                    (x + ctr_x, y + ctr_y),
-                    (width - ctr_x, height - ctr_y),
-                    tree_depth - 1,
-                ),
-            });
-        };
+        // avoid division by zero
+        qt.subdivide(tree_depth);
+        qt.set_avg_pixel();
         qt
     }
 
@@ -70,39 +70,83 @@ impl<'a> QuadTreeNode<'a> {
             .map(|(x, y)| self.img.get_pixel(x, y))
     }
 
-    fn avg_pixel(&self) -> Rgb<u8> {
-        let mut total_r: u32 = 0;
-        let mut total_g: u32 = 0;
-        let mut total_b: u32 = 0;
-        let num_pixels: u32 = self.width * self.height;
-        let mut count_num_pixels: u32 = 0;
-        self.pixels().for_each(|pixel| {
-            let Rgb([r, g, b]) = pixel;
-            let r: u32 = (*r).into();
-            let g: u32 = (*g).into();
-            let b: u32 = (*b).into();
-            total_r += r;
-            total_g += g;
-            total_b += b;
-            count_num_pixels += 1;
+    // recursively calculates the averagePixel for this square,
+    // stores the result in self.avg_pixel, and returns it
+    fn set_avg_pixel(&mut self) -> Rgb<u8> {
+        match &mut *(self.subtree) {
+            SubTree::Leaf => {
+                self.avg_pixel = util::avg_pixels(self.pixels());
+                self.avg_pixel
+            }
+            SubTree::Split { nw, ne, sw, se } => {
+                self.avg_pixel = util::avg_pixels(
+                    [nw, ne, sw, se]
+                        .iter()
+                        .map(|quadrant| -> &Rgb<u8> { &quadrant.avg_pixel }),
+                );
+                self.avg_pixel
+            }
+        }
+    }
+
+    // divide the tree tree_depth times and then set
+    // the average pixel on the current node
+    fn subdivide(&mut self, tree_depth: u32) {
+        match &mut *self.subtree {
+            SubTree::Leaf => {
+                if self.width / 2 <= 0 || self.height / 2 <= 0 {
+                    // eprintln!("subsquares got too small at level {}", tree_depth);
+                } else if tree_depth > 0 {
+                    // TODO: log a warning or something if the tree goes too small
+                    let ctr_x = self.width / 2;
+                    let ctr_y = self.height / 2;
+                    // println!("subdivide image, tree_depth = {}", tree_depth);
+                    self.subtree = Box::new(SubTree::Split {
+                        nw: QuadTreeNode::new(
+                            self.img,
+                            (self.x, self.y),
+                            (ctr_x, ctr_y),
+                            tree_depth - 1,
+                        ),
+                        ne: QuadTreeNode::new(
+                            self.img,
+                            (self.x + ctr_x, self.y),
+                            (self.width - ctr_x, ctr_y),
+                            tree_depth - 1,
+                        ),
+                        sw: QuadTreeNode::new(
+                            self.img,
+                            (self.x, self.y + ctr_y),
+                            (ctr_x, self.height - ctr_y),
+                            tree_depth - 1,
+                        ),
+                        se: QuadTreeNode::new(
+                            self.img,
+                            (self.x + ctr_x, self.y + ctr_y),
+                            (self.width - ctr_x, self.height - ctr_y),
+                            tree_depth - 1,
+                        ),
+                    });
+                }
+            }
+            SubTree::Split { .. } => {
+                self.subtree.quadrants_mut(|q| {
+                    q.subdivide(tree_depth - 1);
+                });
+                todo!("shouldn't use subdivide on non-leaf");
+            }
+        }
+        self.subtree.quadrants_mut(|q| {
+            q.set_avg_pixel();
         });
-        // println!(
-        //     "average looks like {:?}, num_pixels = {:?} or {}",
-        //     (total_r, total_g, total_b),
-        //     num_pixels,
-        //     count_num_pixels
-        // );
-        Rgb([
-            (total_r / num_pixels).try_into().unwrap(),
-            (total_g / num_pixels).try_into().unwrap(),
-            (total_b / num_pixels).try_into().unwrap(),
-        ])
+        // set the avg pixel for this node.
+        self.set_avg_pixel();
     }
 
     fn render(&self, out_image: &mut RgbImage) {
         match &*self.subtree {
             SubTree::Leaf => {
-                let avg_pixel = self.avg_pixel();
+                let avg_pixel = self.avg_pixel;
                 // println!("avg pixel content for this image = {:?}", avg_pixel);
                 let rectangle: ImageBuffer<Rgb<u8>, Vec<u8>> =
                     ImageBuffer::from_fn(self.width, self.height, |_, _| -> Rgb<u8> {
@@ -119,22 +163,62 @@ impl<'a> QuadTreeNode<'a> {
             }
         }
     }
+
+    pub fn prune(&mut self, tolerance: u32) {
+        let variance = util::calc_variance(self.pixels(), self.avg_pixel);
+        match &mut *self.subtree {
+            SubTree::Leaf => (),
+            SubTree::Split { .. } => {
+                if variance <= tolerance {
+                    *self.subtree = SubTree::Leaf;
+                } else {
+                    self.subtree.quadrants_mut(|q| {
+                        q.prune(tolerance);
+                    })
+                }
+            }
+        }
+    }
+
+    fn tree_height(&self) -> u32 {
+        match &*self.subtree {
+            SubTree::Leaf => 0,
+            SubTree::Split { nw, ne, sw, se } => {
+                [nw, ne, sw, se]
+                    .iter()
+                    .map(|qt| qt.tree_height())
+                    .max()
+                    .unwrap()
+                    + 1
+            }
+        }
+    }
 }
 
 impl<'a> QuadTree<'a> {
-    pub fn new(img: &'a RgbImage, tree_depth: u32) -> Self {
+    pub fn new(img: &'a RgbImage, tree_depth: u32) -> Result<Self, String> {
         let height = img.height();
         let width = img.width();
-        let qt = QuadTree {
-            img,
-            root: QuadTreeNode::new(&img, (0, 0), (width, height), tree_depth),
-        };
-        qt
+        if height == 0 || width == 0 {
+            panic!("image is 0 pixels");
+        }
+        let root = QuadTreeNode::new(&img, (0, 0), (width, height), tree_depth);
+        eprintln!(
+            "requested height: {}, actual height = {}",
+            tree_depth,
+            root.tree_height()
+        );
+        Ok(QuadTree { img, root })
     }
 
-    pub fn render(&self, out_path: String) {
+    // can replace with associated function
+    pub fn render(&self, out_path: &str) {
         let mut out_image: RgbImage = RgbImage::new(self.img.width(), self.img.height());
         self.root.render(&mut out_image);
         out_image.save(out_path).expect("image rendering failed");
+    }
+
+    pub fn prune(&mut self, tolerance: u32) {
+        self.root.prune(tolerance);
     }
 }

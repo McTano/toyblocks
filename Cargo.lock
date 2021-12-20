@@ -267,14 +267,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "pixelwise"
-version = "0.1.0"
-dependencies = [
- "image",
- "itertools",
-]
-
-[[package]]
 name = "png"
 version = "0.16.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -332,6 +324,14 @@ dependencies = [
  "jpeg-decoder",
  "miniz_oxide 0.4.4",
  "weezl",
+]
+
+[[package]]
+name = "toyblocks"
+version = "0.1.0"
+dependencies = [
+ "image",
+ "itertools",
 ]
 
 [[package]]
