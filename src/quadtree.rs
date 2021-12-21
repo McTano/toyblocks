@@ -19,17 +19,45 @@ enum SubTree<'a> {
 }
 
 impl<'a> SubTree<'a> {
-    fn quadrants_mut(&mut self, mut cb: impl FnMut(&mut QuadTreeNode) -> ()) {
+    fn apply_mut(&mut self, mut func: impl FnMut(&mut QuadTreeNode) -> ()) {
         match self {
             SubTree::Leaf => (),
             SubTree::Split { nw, ne, sw, se } => {
                 for q in [nw, ne, sw, se] {
-                    cb(q);
+                    func(q);
                 }
             }
         }
     }
+
+    fn apply(&self, func: impl Fn(&QuadTreeNode) -> ()) {
+        if let SubTree::Split { nw, ne, sw, se } = self {
+            for q in [nw, ne, sw, se] {
+                func(q);
+            }
+        }
+    }
+
+    fn get_children(&self) -> Vec<&QuadTreeNode<'a>> {
+        match self {
+            SubTree::Leaf => vec![],
+            SubTree::Split { nw, ne, sw, se } => vec![nw, ne, sw, se],
+        }
+    }
 }
+
+// impl<'a> IntoIterator for SubTree<'a> {
+//     type Item = &'a QuadTreeNode<'a>;
+
+//     type IntoIter = std::vec::IntoIter<&'a QuadTreeNode<'a>>;
+
+//     fn into_iter(self) -> Self::IntoIter {
+//         match &self {
+//             SubTree::Leaf => vec![].into_iter(),
+//             SubTree::Split { nw, ne, sw, se } => vec![nw, ne, sw, se].into_iter(),
+//         }
+//     }
+// }
 
 struct QuadTreeNode<'a> {
     img: &'a RgbImage,
@@ -130,17 +158,29 @@ impl<'a> QuadTreeNode<'a> {
                 }
             }
             SubTree::Split { .. } => {
-                self.subtree.quadrants_mut(|q| {
+                self.subtree.apply_mut(|q| {
                     q.subdivide(tree_depth - 1);
                 });
                 todo!("shouldn't use subdivide on non-leaf");
             }
         }
-        self.subtree.quadrants_mut(|q| {
+        self.subtree.apply_mut(|q| {
             q.set_avg_pixel();
         });
         // set the avg pixel for this node.
         self.set_avg_pixel();
+    }
+
+    pub fn apply_mut(&mut self, func: impl FnMut(&mut QuadTreeNode) -> ()) {
+        self.subtree.apply_mut(func);
+    }
+
+    pub fn apply(&self, func: impl Fn(&QuadTreeNode) -> ()) {
+        self.subtree.apply(func);
+    }
+
+    fn get_children(&self) -> Vec<&QuadTreeNode> {
+        self.subtree.get_children()
     }
 
     fn render(&self, out_image: &mut RgbImage) {
@@ -155,11 +195,10 @@ impl<'a> QuadTreeNode<'a> {
                     });
                 out_image.copy_from(&rectangle, self.x, self.y).unwrap();
             }
-            SubTree::Split { nw, ne, sw, se } => {
-                nw.render(out_image);
-                ne.render(out_image);
-                sw.render(out_image);
-                se.render(out_image);
+            SubTree::Split { .. } => {
+                for q in self.get_children() {
+                    q.render(out_image);
+                }
             }
         }
     }
@@ -172,7 +211,7 @@ impl<'a> QuadTreeNode<'a> {
                 if variance <= tolerance {
                     *self.subtree = SubTree::Leaf;
                 } else {
-                    self.subtree.quadrants_mut(|q| {
+                    self.subtree.apply_mut(|q| {
                         q.prune(tolerance);
                     })
                 }
@@ -220,5 +259,24 @@ impl<'a> QuadTree<'a> {
 
     pub fn prune(&mut self, tolerance: u32) {
         self.root.prune(tolerance);
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::QuadTree;
+
+    #[test]
+    fn it_works() {
+        assert_eq!(1, 1);
+    }
+
+    #[test]
+    fn children_get_unique_pixels() {
+        let img = "images/balloons_huey.jpg";
+        let img = image::open(img).unwrap().to_rgb8();
+        let qt = QuadTree::new(&img, 1).unwrap();
+        qt.root
+            .apply(|q| assert_ne!(q.avg_pixel, qt.root.avg_pixel));
     }
 }
