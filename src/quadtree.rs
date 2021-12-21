@@ -8,6 +8,16 @@ pub(crate) struct QuadTree<'a> {
     img: &'a RgbImage,
     root: QuadTreeNode<'a>,
 }
+
+struct QuadTreeNode<'a> {
+    img: &'a RgbImage,
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+    subtree: Box<SubTree<'a>>,
+    avg_pixel: Rgb<u8>,
+}
 enum SubTree<'a> {
     Leaf,
     Split {
@@ -58,16 +68,6 @@ impl<'a> SubTree<'a> {
 //         }
 //     }
 // }
-
-struct QuadTreeNode<'a> {
-    img: &'a RgbImage,
-    x: u32,
-    y: u32,
-    width: u32,
-    height: u32,
-    subtree: Box<SubTree<'a>>,
-    avg_pixel: Rgb<u8>,
-}
 
 impl<'a> QuadTreeNode<'a> {
     pub fn new(
