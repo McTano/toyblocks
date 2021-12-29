@@ -1,3 +1,4 @@
+#![allow(dead_code)]
 use image::GenericImage;
 use image::{ImageBuffer, Rgb, RgbImage};
 use itertools::Itertools;
@@ -235,7 +236,7 @@ impl<'a> QuadTreeNode<'a> {
 }
 
 impl<'a> QuadTree<'a> {
-    pub fn new(img: &'a RgbImage, tree_depth: u32) -> Result<Self, String> {
+    pub fn new(img: &'a RgbImage, tree_depth: u32) -> Self {
         let height = img.height();
         let width = img.width();
         if height == 0 || width == 0 {
@@ -247,7 +248,7 @@ impl<'a> QuadTree<'a> {
             tree_depth,
             root.tree_height()
         );
-        Ok(QuadTree { img, root })
+        QuadTree { img, root }
     }
 
     // can replace with associated function
@@ -275,7 +276,7 @@ mod test {
     fn children_get_unique_pixels() {
         let img = "images/balloons_huey.jpg";
         let img = image::open(img).unwrap().to_rgb8();
-        let qt = QuadTree::new(&img, 1).unwrap();
+        let qt = QuadTree::new(&img, 1);
         qt.root
             .apply(|q| assert_ne!(q.avg_pixel, qt.root.avg_pixel));
     }

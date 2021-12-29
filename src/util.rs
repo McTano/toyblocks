@@ -1,6 +1,6 @@
-use std::iter::Iterator;
-
+#![allow(dead_code)]
 use image::{Pixel, Rgb};
+use std::iter::Iterator;
 
 // use std::iter::Step;
 
