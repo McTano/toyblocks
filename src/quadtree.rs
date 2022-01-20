@@ -1,35 +1,36 @@
 #![allow(dead_code)]
+use once_cell::sync::Lazy;
+
 use image::GenericImage;
 use image::{ImageBuffer, Rgb, RgbImage};
 use itertools::Itertools;
 
 use crate::util;
 
-pub(crate) struct QuadTree<'a> {
-    img: &'a RgbImage,
-    root: QuadTreeNode<'a>,
+pub(crate) struct QuadTree {
+    img: RgbImage,
+    root: QuadTreeNode,
 }
 
-struct QuadTreeNode<'a> {
-    img: &'a RgbImage,
+struct QuadTreeNode {
     x: u32,
     y: u32,
     width: u32,
     height: u32,
-    subtree: Box<SubTree<'a>>,
-    avg_pixel: Rgb<u8>,
+    subtree: Box<SubTree>,
+    avg_pixel: Lazy<Rgb<u8>>,
 }
-enum SubTree<'a> {
+enum SubTree {
     Leaf,
     Split {
-        nw: QuadTreeNode<'a>,
-        ne: QuadTreeNode<'a>,
-        sw: QuadTreeNode<'a>,
-        se: QuadTreeNode<'a>,
+        nw: QuadTreeNode,
+        ne: QuadTreeNode,
+        sw: QuadTreeNode,
+        se: QuadTreeNode,
     },
 }
 
-impl<'a> SubTree<'a> {
+impl SubTree {
     fn apply_mut(&mut self, mut func: impl FnMut(&mut QuadTreeNode) -> ()) {
         match self {
             SubTree::Leaf => (),
@@ -49,7 +50,7 @@ impl<'a> SubTree<'a> {
         }
     }
 
-    fn get_children(&self) -> Vec<&QuadTreeNode<'a>> {
+    fn get_children(&self) -> Vec<&QuadTreeNode> {
         match self {
             SubTree::Leaf => vec![],
             SubTree::Split { nw, ne, sw, se } => vec![nw, ne, sw, se],
@@ -57,10 +58,10 @@ impl<'a> SubTree<'a> {
     }
 }
 
-// impl<'a> IntoIterator for SubTree<'a> {
-//     type Item = &'a QuadTreeNode<'a>;
+// impl IntoIterator for SubTree {
+//     type Item = & QuadTreeNode;
 
-//     type IntoIter = std::vec::IntoIter<&'a QuadTreeNode<'a>>;
+//     type IntoIter = std::vec::IntoIter<& QuadTreeNode>;
 
 //     fn into_iter(self) -> Self::IntoIter {
 //         match &self {
@@ -70,15 +71,14 @@ impl<'a> SubTree<'a> {
 //     }
 // }
 
-impl<'a> QuadTreeNode<'a> {
+impl QuadTreeNode {
     pub fn new(
-        img: &'a RgbImage,
+        img: &RgbImage,
         (x, y): (u32, u32),
         (width, height): (u32, u32),
         tree_depth: u32,
     ) -> Self {
-        let mut qt: QuadTreeNode<'a> = QuadTreeNode {
-            img,
+        let mut qt: QuadTreeNode = QuadTreeNode {
             x,
             y,
             width,
@@ -88,23 +88,22 @@ impl<'a> QuadTreeNode<'a> {
             avg_pixel: Rgb([0, 0, 0]),
         };
         // avoid division by zero
-        qt.subdivide(tree_depth);
-        qt.set_avg_pixel();
+        qt.subdivide(tree_depth, &img);
         qt
     }
 
-    fn pixels(&self) -> impl Iterator<Item = &Rgb<u8>> {
+    fn pixels<'a>(&self, img: &'a RgbImage) -> impl Iterator<Item = &'a Rgb<u8>> {
         (self.x..(self.x + self.width))
             .cartesian_product(self.y..(self.y + self.height))
-            .map(|(x, y)| self.img.get_pixel(x, y))
+            .map(|(x, y)| img.get_pixel(x, y))
     }
 
     // recursively calculates the averagePixel for this square,
     // stores the result in self.avg_pixel, and returns it
-    fn set_avg_pixel(&mut self) -> Rgb<u8> {
+    fn set_avg_pixel(&mut self, img: &RgbImage) -> Rgb<u8> {
         match &mut *(self.subtree) {
             SubTree::Leaf => {
-                self.avg_pixel = util::avg_pixels(self.pixels());
+                self.avg_pixel = util::avg_pixels(self.pixels(img));
                 self.avg_pixel
             }
             SubTree::Split { nw, ne, sw, se } => {
@@ -120,7 +119,7 @@ impl<'a> QuadTreeNode<'a> {
 
     // divide the tree tree_depth times and then set
     // the average pixel on the current node
-    fn subdivide(&mut self, tree_depth: u32) {
+    fn subdivide(&mut self, tree_depth: u32, img: &RgbImage) {
         match &mut *self.subtree {
             SubTree::Leaf => {
                 if self.width / 2 <= 0 || self.height / 2 <= 0 {
@@ -132,25 +131,25 @@ impl<'a> QuadTreeNode<'a> {
                     // println!("subdivide image, tree_depth = {}", tree_depth);
                     self.subtree = Box::new(SubTree::Split {
                         nw: QuadTreeNode::new(
-                            self.img,
+                            &img,
                             (self.x, self.y),
                             (ctr_x, ctr_y),
                             tree_depth - 1,
                         ),
                         ne: QuadTreeNode::new(
-                            self.img,
+                            &img,
                             (self.x + ctr_x, self.y),
                             (self.width - ctr_x, ctr_y),
                             tree_depth - 1,
                         ),
                         sw: QuadTreeNode::new(
-                            self.img,
+                            &img,
                             (self.x, self.y + ctr_y),
                             (ctr_x, self.height - ctr_y),
                             tree_depth - 1,
                         ),
                         se: QuadTreeNode::new(
-                            self.img,
+                            &img,
                             (self.x + ctr_x, self.y + ctr_y),
                             (self.width - ctr_x, self.height - ctr_y),
                             tree_depth - 1,
@@ -160,16 +159,16 @@ impl<'a> QuadTreeNode<'a> {
             }
             SubTree::Split { .. } => {
                 self.subtree.apply_mut(|q| {
-                    q.subdivide(tree_depth - 1);
+                    q.subdivide(tree_depth - 1, img);
                 });
                 todo!("shouldn't use subdivide on non-leaf");
             }
         }
         self.subtree.apply_mut(|q| {
-            q.set_avg_pixel();
+            q.set_avg_pixel(img);
         });
         // set the avg pixel for this node.
-        self.set_avg_pixel();
+        self.set_avg_pixel(img);
     }
 
     pub fn apply_mut(&mut self, func: impl FnMut(&mut QuadTreeNode) -> ()) {
@@ -204,8 +203,8 @@ impl<'a> QuadTreeNode<'a> {
         }
     }
 
-    pub fn prune(&mut self, tolerance: u32) {
-        let variance = util::calc_variance(self.pixels(), self.avg_pixel);
+    pub fn prune(&mut self, tolerance: u32, img: &RgbImage) {
+        let variance = util::calc_variance(self.pixels(img), self.avg_pixel);
         match &mut *self.subtree {
             SubTree::Leaf => (),
             SubTree::Split { .. } => {
@@ -213,7 +212,7 @@ impl<'a> QuadTreeNode<'a> {
                     *self.subtree = SubTree::Leaf;
                 } else {
                     self.subtree.apply_mut(|q| {
-                        q.prune(tolerance);
+                        q.prune(tolerance, img);
                     })
                 }
             }
@@ -235,8 +234,8 @@ impl<'a> QuadTreeNode<'a> {
     }
 }
 
-impl<'a> QuadTree<'a> {
-    pub fn new(img: &'a RgbImage, tree_depth: u32) -> Self {
+impl QuadTree {
+    pub fn new(img: RgbImage, tree_depth: u32) -> Self {
         let height = img.height();
         let width = img.width();
         if height == 0 || width == 0 {
@@ -259,7 +258,7 @@ impl<'a> QuadTree<'a> {
     }
 
     pub fn prune(&mut self, tolerance: u32) {
-        self.root.prune(tolerance);
+        self.root.prune(tolerance, &self.img);
     }
 }
 
@@ -276,7 +275,7 @@ mod test {
     fn children_get_unique_pixels() {
         let img = "images/balloons_huey.jpg";
         let img = image::open(img).unwrap().to_rgb8();
-        let qt = QuadTree::new(&img, 1);
+        let qt = QuadTree::new(img.clone(), 1);
         qt.root
             .apply(|q| assert_ne!(q.avg_pixel, qt.root.avg_pixel));
     }

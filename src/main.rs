@@ -21,7 +21,7 @@ fn compress_image(in_path: &String, tolerance: u32, out_path: &String) {
     let img: RgbImage = image::open(in_path)
         .expect("failed to open image")
         .into_rgb8();
-    let mut qt = QuadTree::new(&img, DEFAULT_TREE_DEPTH);
+    let mut qt = QuadTree::new(img.clone(), DEFAULT_TREE_DEPTH);
     qt.prune(tolerance);
     qt.render(out_path);
     println!("rendered compressed image at {}", out_path);
@@ -33,9 +33,9 @@ mod test {
     use crate::quadtree::QuadTree;
 
     #[allow(dead_code)]
-    fn pruning_test<'a>(rgb_image: &'a RgbImage, file_name: String) -> QuadTree<'a> {
+    fn pruning_test(rgb_image: RgbImage, file_name: String) -> QuadTree {
         println!("Now, let's try pruning to a reasonable variance");
-        let mut qt2 = QuadTree::new(&rgb_image, 10);
+        let mut qt2 = QuadTree::new(rgb_image, 10);
         for tolerance in [5, 10, 15] {
             qt2.prune(tolerance);
             qt2.render(&format!(
@@ -60,9 +60,9 @@ mod test {
                 let out_path = format!("output/out-{}", file_name);
                 let img = image::open(in_path).expect("failed to open img");
                 let rgb_image: RgbImage = img.into_rgb8();
-                let qt = QuadTree::new(&rgb_image, 5);
+                let qt = QuadTree::new(rgb_image.clone(), 5);
                 qt.render(&out_path);
-                pruning_test(&rgb_image, file_name);
+                pruning_test(rgb_image, file_name);
             } else {
                 println!("encountered error while reading file list");
             }
